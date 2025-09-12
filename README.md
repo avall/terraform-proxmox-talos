@@ -22,6 +22,10 @@ module "talos" {
       memory            = 8192 # 8 GB
       disk_size         = 64
       image_datastore   = "local-lvm"
+      # Optional static IPv4 for this VM (CIDR). If omitted, DHCP is used.
+      ipv4              = "10.10.30.230/24"
+      # Optional gateway (only used when ipv4 is set)
+      ipv4_gateway      = "10.10.30.1"
     },
     "talos-control-1" = {
       proxmox_node_name = "pve-node-02"
@@ -39,6 +43,10 @@ module "talos" {
       memory            = 8192 # 8 GB
       disk_size         = 100
       image_datastore   = "local-lvm"
+      # Optional static IPv4 for this VM (CIDR). If omitted, DHCP is used.
+      ipv4              = "192.168.50.20/24"
+      # Optional gateway (only used when ipv4 is set)
+      ipv4_gateway      = "192.168.50.1"
       extra_disks = [ # Additional disk for talos-worker-0
         {
           datastore_id = "nfs-storage"
@@ -58,6 +66,16 @@ module "talos" {
   }
 }
 ```
+
+## FAQ
+
+- What are `control_node_ips`, `worker_node_ips`, and `node_ips`? Are these pre-assigned IPs or IPs discovered after the VMs are created?
+  - They are IPs discovered/exposed by the VMs after they have been created and booted. The Proxmox provider reads these addresses through the guest agent (qemu-guest-agent) and exposes them in `ipv4_addresses`. In this module, the IPs are read from those properties of the already-created `proxmox_virtual_environment_vm` resources and then reused to configure Talos (cluster_endpoint, bootstrap, kubeconfig, etc.).
+  - In other words: Terraform does not pre-assign these IPs here. They must come from your network (for example, via DHCP or a static configuration baked into the image). Once the VMs obtain their IP, the module reads it and uses it.
+  - `node_ips = concat(local.control_node_ips, local.worker_node_ips)` simply builds a list with all IPs (control + workers) so that Talos can target all nodes when needed.
+
+- And what about the `[7][0]` index in `ipv4_addresses[7][0]`?
+  - It refers to a specific position within the structure returned by the provider (a list of lists of addresses). Depending on your network/bridge/VLAN setup, the index may vary. If your IP is not being resolved correctly, inspect which positions `ipv4_addresses` returns for your VMs and adjust the index in `main.tf`.
 
 Check out our [blog post](https://bbtechsystems.com/blog/k8s-with-pxe-tf/) for more details on using this module.
 

@@ -1,9 +1,21 @@
 # Copyright (c) 2024 BB Tech Systems LLC
 
+# Local values derived from VMs that have already been created. These IPs are
+# discovered via the Proxmox guest agent after the VMs boot and obtain an IP
+# (e.g., via DHCP or a static config baked into the image). They are NOT
+# IPs you pre‑assign with Terraform; rather, they are read from the running VMs
+# and then reused to configure and bootstrap Talos.
 locals {
+    # First control plane node IP (used for cluster_endpoint, bootstrap and kubeconfig)
     primary_control_node_ip = proxmox_virtual_environment_vm.talos_control_vm[keys(var.control_nodes)[0]].ipv4_addresses[7][0]
+
+    # All control plane node IPs discovered from the created VMs
     control_node_ips = [for vm in keys(var.control_nodes) : proxmox_virtual_environment_vm.talos_control_vm[vm].ipv4_addresses[7][0]]
+
+    # All worker node IPs discovered from the created VMs
     worker_node_ips = [for vm in keys(var.worker_nodes) : proxmox_virtual_environment_vm.talos_worker_vm[vm].ipv4_addresses[7][0]]
+
+    # Convenience list of every node IP (control + worker)
     node_ips = concat(
         local.control_node_ips,
         local.worker_node_ips
@@ -45,6 +57,14 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
         vlan_id = var.proxmox_network_vlan_id
         bridge  = var.proxmox_network_bridge
     }
+    initialization {
+        ip_config {
+            ipv4 {
+                address = coalesce(try(each.value.ipv4, null), "dhcp")
+                gateway = try(each.value.ipv4_gateway, null)
+            }
+        }
+    }
     operating_system {
         type = "l26"
     }
@@ -76,6 +96,14 @@ resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
     network_device {
         vlan_id = var.proxmox_network_vlan_id
         bridge  = var.proxmox_network_bridge
+    }
+    initialization {
+        ip_config {
+            ipv4 {
+                address = coalesce(try(each.value.ipv4, null), "dhcp")
+                gateway = try(each.value.ipv4_gateway, null)
+            }
+        }
     }
     dynamic "disk" {
         for_each = each.value.extra_disks # Now directly access 'extra_disks' from the 'each.value' object

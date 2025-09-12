@@ -88,6 +88,8 @@ variable "control_nodes" {
         memory            = number
         disk_size         = number
         image_datastore   = string
+        ipv4              = optional(string)      # Optional static IPv4 in CIDR format, e.g., "192.168.1.10/24". Use DHCP if omitted.
+        ipv4_gateway      = optional(string)      # Optional gateway for the static IPv4, e.g., "192.168.1.1"
     }))
 }
 
@@ -99,6 +101,8 @@ variable "worker_nodes" {
         memory            = number
         disk_size         = number
         image_datastore   = string
+        ipv4              = optional(string)      # Optional static IPv4 in CIDR format, e.g., "192.168.1.20/24". Use DHCP if omitted.
+        ipv4_gateway      = optional(string)      # Optional gateway for the static IPv4, e.g., "192.168.1.1"
         extra_disks       = optional(list(object({
             datastore_id = string
             size         = number
