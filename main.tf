@@ -57,14 +57,6 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
         vlan_id = var.proxmox_network_vlan_id
         bridge  = var.proxmox_network_bridge
     }
-    initialization {
-        ip_config {
-            ipv4 {
-                address = coalesce(try(each.value.ipv4, null), "dhcp")
-                gateway = try(each.value.ipv4_gateway, null)
-            }
-        }
-    }
     operating_system {
         type = "l26"
     }
@@ -96,14 +88,6 @@ resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
     network_device {
         vlan_id = var.proxmox_network_vlan_id
         bridge  = var.proxmox_network_bridge
-    }
-    initialization {
-        ip_config {
-            ipv4 {
-                address = coalesce(try(each.value.ipv4, null), "dhcp")
-                gateway = try(each.value.ipv4_gateway, null)
-            }
-        }
     }
     dynamic "disk" {
         for_each = each.value.extra_disks # Now directly access 'extra_disks' from the 'each.value' object
