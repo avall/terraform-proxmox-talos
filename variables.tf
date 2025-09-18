@@ -83,6 +83,10 @@ variable "talos_arch" {
 variable "control_nodes" {
     description = "Map of Talos control node names to their Proxmox node names and VM configurations"
     type        = map(object({
+        ip_address        = optional(string)
+        subnet_mask       = optional(number)
+        gateway           = optional(string)
+        dns_servers       = optional(list(string))
         proxmox_node_name = string
         cores             = number
         memory            = number

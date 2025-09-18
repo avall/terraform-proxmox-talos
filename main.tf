@@ -60,6 +60,25 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     operating_system {
         type = "l26"
     }
+
+  initialization {
+    ip_config {
+      ipv4 {
+        address = "${each.ip_address}/${each.subnet_mask}"
+        gateway = each.gateway
+      }
+    }
+
+    dns {
+      servers = each.dns_servers
+    }
+
+    # Disable cloud-init user creation (Talos manages this)
+    user_account {
+      username = "talos"
+      password = "disabled"
+    }
+  }
 }
 
 resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
