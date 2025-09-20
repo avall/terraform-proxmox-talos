@@ -45,6 +45,14 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
         dedicated = each.value.memory # Use memory from the map
         floating  = each.value.memory # Use memory from the map
     }
+    disk {
+        datastore_id = each.value.image_datastore # Use image datastore from the map
+        file_id      = proxmox_virtual_environment_download_file.talos_image.id
+        interface    = "virtio0"
+        iothread     = true
+        discard      = "on"
+        size         = each.value.disk_size # Use disk size from the map
+    }
     network_device {
         vlan_id = var.proxmox_network_vlan_id
         bridge  = var.proxmox_network_bridge
@@ -54,19 +62,6 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     }
 
   initialization {
-    dynamic "disk" {
-      for_each  = var.control_nodes
-      content {
-        datastore_id = each.value.image_datastore # Use image datastore from the map
-        file_id      = proxmox_virtual_environment_download_file.talos_image.id
-        interface    = "virtio0"
-        iothread     = true
-        discard      = "on"
-        size         = each.value.disk_size # Use disk size from the map
-      }
-
-    }
-
     dynamic "ip_config" {
       for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
       content {
