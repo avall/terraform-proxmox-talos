@@ -65,11 +65,11 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     datastore_id = each.value.image_datastore
 
     dynamic "ip_config" {
-      for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
+      for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
       content {
         ipv4 {
-          address = "${each.value.ip_address}/${each.value.subnet_mask}"
-          gateway = each.value.gateway
+          address = "${each.value.ip_address}"
+          gateway = each.value.ip_gateway
         }
       }
     }
@@ -82,13 +82,10 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     }
 
     # Disable cloud-init user creation (Talos manages this)
-    dynamic "user_account" {
-      for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
-      content {
+    user_account {
         username = "talos"
         password = "disabled"
       }
-    }
   }
 }
 
