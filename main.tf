@@ -73,7 +73,7 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     }
 
     dynamic "dns" {
-      for_each = length(coalescelist(each.value.dns_servers, [])) > 0 ? [1] : []
+      for_each = try(each.value.dns_servers, null) != null ? [1] : []
       content {
         servers = each.value.dns_servers
       }
