@@ -62,6 +62,8 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     }
 
   initialization {
+    datastore_id = var.control_nodes[0].image_datastore
+
     dynamic "ip_config" {
       for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
       content {
