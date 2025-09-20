@@ -61,33 +61,33 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
         type = "l26"
     }
 
-  initialization {
-    dynamic "ip_config" {
-      for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
-      content {
-        ipv4 {
-          address = "${each.value.ip_address}/${each.value.subnet_mask}"
-          gateway = each.value.gateway
-        }
-      }
-    }
-
-    dynamic "dns" {
-      for_each = try(each.value.dns_servers, null) != null ? [1] : []
-      content {
-        servers = each.value.dns_servers
-      }
-    }
-
-    # Disable cloud-init user creation (Talos manages this)
-    dynamic "user_account" {
-      for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
-      content {
-        username = "talos"
-        password = "disabled"
-      }
-    }
-  }
+  # initialization {
+  #   dynamic "ip_config" {
+  #     for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
+  #     content {
+  #       ipv4 {
+  #         address = "${each.value.ip_address}/${each.value.subnet_mask}"
+  #         gateway = each.value.gateway
+  #       }
+  #     }
+  #   }
+  #
+  #   dynamic "dns" {
+  #     for_each = try(each.value.dns_servers, null) != null ? [1] : []
+  #     content {
+  #       servers = each.value.dns_servers
+  #     }
+  #   }
+  #
+  #   # Disable cloud-init user creation (Talos manages this)
+  #   dynamic "user_account" {
+  #     for_each = (try(each.value.ip_address, null) != null && try(each.value.subnet_mask, null) != null && try(each.value.gateway, null) != null) ? [1] : []
+  #     content {
+  #       username = "talos"
+  #       password = "disabled"
+  #     }
+  #   }
+  # }
 }
 
 resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
