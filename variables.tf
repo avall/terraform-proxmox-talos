@@ -99,6 +99,7 @@ variable "worker_nodes" {
     type        = map(object({
         ip_address        = optional(string)
         ip_gateway        = optional(string)
+        dns_servers       = optional(list(string))
         proxmox_node_name = string
         cores             = number
         memory            = number
