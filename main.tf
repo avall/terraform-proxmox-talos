@@ -6,20 +6,35 @@
 # IPs you pre‑assign with Terraform; rather, they are read from the running VMs
 # and then reused to configure and bootstrap Talos.
 locals {
-    # First control plane node IP (used for cluster_endpoint, bootstrap and kubeconfig)
-    primary_control_node_ip = proxmox_virtual_environment_vm.talos_control_vm[keys(var.control_nodes)[0]].ipv4_addresses[7][0]
-
-    # All control plane node IPs discovered from the created VMs
-    control_node_ips = [for vm in keys(var.control_nodes) : proxmox_virtual_environment_vm.talos_control_vm[vm].ipv4_addresses[7][0]]
-
-    # All worker node IPs discovered from the created VMs
-    worker_node_ips = [for vm in keys(var.worker_nodes) : proxmox_virtual_environment_vm.talos_worker_vm[vm].ipv4_addresses[7][0]]
-
-    # Convenience list of every node IP (control + worker)
-    node_ips = concat(
-        local.control_node_ips,
-        local.worker_node_ips
+  # Prefer statically provided IPs from variables; fall back to guest-agent discovered IPs.
+  # Strip CIDR if provided (e.g., 10.10.30.97/24 -> 10.10.30.97)
+  control_node_ip_map = {
+    for name, cfg in var.control_nodes :
+    name => (
+      try(cfg.ip_address, null) != null
+      ? split("/", cfg.ip_address)[0]
+      : proxmox_virtual_environment_vm.talos_control_vm[name].ipv4_addresses[7][0]
     )
+  }
+
+  worker_node_ip_map = {
+    for name, cfg in var.worker_nodes :
+    name => (
+      try(cfg.ip_address, null) != null
+      ? split("/", cfg.ip_address)[0]
+      : proxmox_virtual_environment_vm.talos_worker_vm[name].ipv4_addresses[7][0]
+    )
+  }
+
+  # First control plane node IP (used for cluster_endpoint, bootstrap and kubeconfig)
+  primary_control_node_ip = values(local.control_node_ip_map)[0]
+
+  # All control and worker IPs (ordered by map iteration)
+  control_node_ips = values(local.control_node_ip_map)
+  worker_node_ips  = values(local.worker_node_ip_map)
+
+  # Convenience list of every node IP (control + worker)
+  node_ips = concat(local.control_node_ips, local.worker_node_ips)
 }
 
 resource "proxmox_virtual_environment_download_file" "talos_image" {
@@ -193,16 +208,16 @@ data "talos_client_configuration" "talos_client_config" {
 resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
     for_each                      = var.control_nodes
     client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
-    machine_configuration_input = data.talos_machine_configuration.control_mc.machine_configuration
-    node                          = proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
+    machine_configuration_input   = data.talos_machine_configuration.control_mc.machine_configuration
+    node                          = local.control_node_ip_map[each.key]
     config_patches                = var.control_machine_config_patches
 }
 
 resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
     for_each                      = var.worker_nodes
     client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
-    machine_configuration_input = data.talos_machine_configuration.worker_mc.machine_configuration
-    node                          = proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
+    machine_configuration_input   = data.talos_machine_configuration.worker_mc.machine_configuration
+    node                          = local.worker_node_ip_map[each.key]
     config_patches                = var.worker_machine_config_patches
 }
 
