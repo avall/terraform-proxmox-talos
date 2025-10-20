@@ -6,32 +6,87 @@
 # IPs you pre‑assign with Terraform; rather, they are read from the running VMs
 # and then reused to configure and bootstrap Talos.
 locals {
-  # Prefer statically provided IPs from variables; fall back to guest-agent discovered IPs.
-  # Strip CIDR if provided (e.g., 10.10.30.97/24 -> 10.10.30.97)
-  control_node_ip_map = {
+  # IP maps for different purposes
+  # 1) Prefer static IPs (if provided) for cluster endpoint and client lists
+  control_node_ip_static_pref = {
     for name, cfg in var.control_nodes :
     name => (
       try(cfg.ip_address, null) != null
       ? split("/", cfg.ip_address)[0]
-      : proxmox_virtual_environment_vm.talos_control_vm[name].ipv4_addresses[7][0]
+      : try(
+          element([
+            for ip in flatten(proxmox_virtual_environment_vm.talos_control_vm[name].ipv4_addresses) : ip
+            if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/", ip))
+          ], 0),
+          null
+        )
     )
   }
-
-  worker_node_ip_map = {
+  worker_node_ip_static_pref = {
     for name, cfg in var.worker_nodes :
     name => (
       try(cfg.ip_address, null) != null
       ? split("/", cfg.ip_address)[0]
-      : proxmox_virtual_environment_vm.talos_worker_vm[name].ipv4_addresses[7][0]
+      : try(
+          element([
+            for ip in flatten(proxmox_virtual_environment_vm.talos_worker_vm[name].ipv4_addresses) : ip
+            if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/", ip))
+          ], 0),
+          null
+        )
+    )
+  }
+
+  # 2) Prefer discovered IPs for the initial apply step (fallback to static if discovery not available)
+  control_node_ip_discovered_pref = {
+    for name, cfg in var.control_nodes :
+    name => (
+      try(
+        element([
+          for ip in flatten(proxmox_virtual_environment_vm.talos_control_vm[name].ipv4_addresses) : ip
+          if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/", ip))
+        ], 0),
+        null
+      ) != null
+      ? element([
+          for ip in flatten(proxmox_virtual_environment_vm.talos_control_vm[name].ipv4_addresses) : ip
+          if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/", ip))
+        ], 0)
+      : (
+        try(cfg.ip_address, null) != null
+        ? split("/", cfg.ip_address)[0]
+        : null
+      )
+    )
+  }
+  worker_node_ip_discovered_pref = {
+    for name, cfg in var.worker_nodes :
+    name => (
+      try(
+        element([
+          for ip in flatten(proxmox_virtual_environment_vm.talos_worker_vm[name].ipv4_addresses) : ip
+          if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/", ip))
+        ], 0),
+        null
+      ) != null
+      ? element([
+          for ip in flatten(proxmox_virtual_environment_vm.talos_worker_vm[name].ipv4_addresses) : ip
+          if can(regex("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/", ip))
+        ], 0)
+      : (
+        try(cfg.ip_address, null) != null
+        ? split("/", cfg.ip_address)[0]
+        : null
+      )
     )
   }
 
   # First control plane node IP (used for cluster_endpoint, bootstrap and kubeconfig)
-  primary_control_node_ip = values(local.control_node_ip_map)[0]
+  primary_control_node_ip = values(local.control_node_ip_static_pref)[0]
 
   # All control and worker IPs (ordered by map iteration)
-  control_node_ips = values(local.control_node_ip_map)
-  worker_node_ips  = values(local.worker_node_ip_map)
+  control_node_ips = values(local.control_node_ip_static_pref)
+  worker_node_ips  = values(local.worker_node_ip_static_pref)
 
   # Convenience list of every node IP (control + worker)
   node_ips = concat(local.control_node_ips, local.worker_node_ips)
@@ -209,16 +264,69 @@ resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
     for_each                      = var.control_nodes
     client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
     machine_configuration_input   = data.talos_machine_configuration.control_mc.machine_configuration
-    node                          = local.control_node_ip_map[each.key]
-    config_patches                = var.control_machine_config_patches
+    # Ensure VMs are created before attempting to contact Talos nodes
+    depends_on                    = [
+      proxmox_virtual_environment_vm.talos_control_vm,
+      proxmox_virtual_environment_vm.talos_worker_vm
+    ]
+    # Use discovered IP first (typically from DHCP); fallback to static for initial contact
+    node                          = local.control_node_ip_discovered_pref[each.key]
+    # Apply base patches plus a per-node network patch when static addressing is provided
+    config_patches                = concat(
+      var.control_machine_config_patches,
+      try(each.value.ip_address, null) != null ? [
+        yamlencode({
+          machine = {
+            network = merge(
+              {
+                hostname   = each.key
+                interfaces = [{
+                  interface = "eth0"
+                  addresses = [each.value.ip_address]
+                  routes    = try(each.value.ip_gateway, null) != null ? [{
+                    network = "0.0.0.0/0"
+                    gateway = each.value.ip_gateway
+                  }] : []
+                }]
+              },
+              try(each.value.dns_servers, null) != null ? { nameservers = { servers = each.value.dns_servers } } : {}
+            )
+          }
+        })
+      ] : []
+    )
 }
 
 resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
     for_each                      = var.worker_nodes
     client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
     machine_configuration_input   = data.talos_machine_configuration.worker_mc.machine_configuration
-    node                          = local.worker_node_ip_map[each.key]
-    config_patches                = var.worker_machine_config_patches
+    # Use discovered IP first (typically from DHCP); fallback to static for initial contact
+    node                          = local.worker_node_ip_discovered_pref[each.key]
+    # Apply base patches plus a per-node network patch when static addressing is provided
+    config_patches                = concat(
+      var.worker_machine_config_patches,
+      try(each.value.ip_address, null) != null ? [
+        yamlencode({
+          machine = {
+            network = merge(
+              {
+                hostname   = each.key
+                interfaces = [{
+                  interface = "eth0"
+                  addresses = [each.value.ip_address]
+                  routes    = try(each.value.ip_gateway, null) != null ? [{
+                    network = "0.0.0.0/0"
+                    gateway = each.value.ip_gateway
+                  }] : []
+                }]
+              },
+              try(each.value.dns_servers, null) != null ? { nameservers = { servers = each.value.dns_servers } } : {}
+            )
+          }
+        })
+      ] : []
+    )
 }
 
 # You only need to bootstrap 1 control node; we pick the first one.
