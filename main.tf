@@ -6,22 +6,20 @@
 # IPs you pre‑assign with Terraform; rather, they are read from the running VMs
 # and then reused to configure and bootstrap Talos.
 locals {
-  # RESTRICCIÓN: El primer nodo de control debe tener una IP estática.
-  first_control_node_key    = keys(var.control_nodes)[0]
-  first_control_node_config = var.control_nodes[local.first_control_node_key]
-  primary_control_node_ip   = cidrhost(local.first_control_node_config.ip_address, 0)
+    # First control plane node IP (used for cluster_endpoint, bootstrap and kubeconfig)
+    primary_control_node_ip = proxmox_virtual_environment_vm.talos_control_vm[keys(var.control_nodes)[0]].ipv4_addresses[7][0]
 
-  # Las siguientes IPs se calculan después de crear las VMs.
-  # Se usan para generar el fichero de configuración del cliente de Talos.
-  control_node_ips = [
-    for k, v in var.control_nodes :
-    try(v.ip_address, null) != null ? cidrhost(v.ip_address, 0) : proxmox_virtual_environment_vm.talos_control_vm[k].ipv4_addresses[7][0]
-  ]
-  worker_node_ips = [
-    for k, v in var.worker_nodes :
-    try(v.ip_address, null) != null ? cidrhost(v.ip_address, 0) : proxmox_virtual_environment_vm.talos_worker_vm[k].ipv4_addresses[7][0]
-  ]
-  node_ips = concat(local.control_node_ips, local.worker_node_ips)
+    # All control plane node IPs discovered from the created VMs
+    control_node_ips = [for vm in keys(var.control_nodes) : proxmox_virtual_environment_vm.talos_control_vm[vm].ipv4_addresses[7][0]]
+
+    # All worker node IPs discovered from the created VMs
+    worker_node_ips = [for vm in keys(var.worker_nodes) : proxmox_virtual_environment_vm.talos_worker_vm[vm].ipv4_addresses[7][0]]
+
+    # Convenience list of every node IP (control + worker)
+    node_ips = concat(
+        local.control_node_ips,
+        local.worker_node_ips
+    )
 }
 
 resource "proxmox_virtual_environment_download_file" "talos_image" {
@@ -66,10 +64,15 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
     initialization {
       datastore_id = each.value.image_datastore
 
-      # CORRECCIÓN: Usar 'cicustom' en lugar de 'user_data'
-      cicustom = try(each.value.ip_address, null) != null ? templatefile("${path.module}/cloud-init.yml.tftpl", {
-        machine_config = b64encode(data.talos_machine_configuration.control_mc[each.key].machine_configuration)
-      }) : null
+      dynamic "ip_config" {
+        for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
+        content {
+          ipv4 {
+            address = "${each.value.ip_address}"
+            gateway = each.value.ip_gateway
+          }
+        }
+      }
 
       dynamic "dns" {
         for_each = try(each.value.dns_servers, null) != null ? [1] : []
@@ -78,10 +81,11 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
         }
       }
 
+      # Disable cloud-init user creation (Talos manages this)
       user_account {
-        username = "talos"
-        password = "disabled"
-      }
+          username = "talos"
+          password = "disabled"
+        }
     }
 }
 
@@ -128,64 +132,55 @@ resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
         type = "l26"
     }
 
-  initialization {
-    datastore_id = each.value.image_datastore
+    initialization {
+      datastore_id = each.value.image_datastore
 
-    # CORRECCIÓN: Usar 'cicustom' en lugar de 'user_data'
-    cicustom = try(each.value.ip_address, null) != null ? templatefile("${path.module}/cloud-init.yml.tftpl", {
-      machine_config = b64encode(data.talos_machine_configuration.worker_mc[each.key].machine_configuration)
-    }) : null
-  }
+      dynamic "ip_config" {
+        for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
+        content {
+          ipv4 {
+            address = "${each.value.ip_address}"
+            gateway = each.value.ip_gateway
+          }
+        }
+      }
+
+      dynamic "dns" {
+        for_each = try(each.value.dns_servers, null) != null ? [1] : []
+        content {
+          servers = each.value.dns_servers
+        }
+      }
+
+      # Disable cloud-init user creation (Talos manages this)
+      user_account {
+        username = "talos"
+        password = "disabled"
+      }
+    }
+
 }
 
 resource "talos_machine_secrets" "talos_secrets" {}
 
 data "talos_machine_configuration" "control_mc" {
-  for_each              = var.control_nodes
-  cluster_name          = var.talos_cluster_name
-  machine_type          = "controlplane"
-  cluster_endpoint      = "https://${local.primary_control_node_ip}:6443"
-  machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
-
-  # Añade el parche de red solo si la IP está definida
-  config_patches = try(each.value.ip_address, null) != null ? [
-    <<-EOT
-machine:
-  network:
-    interfaces:
-      - interface: eth0
-        dhcp: false
-        addresses:
-          - ${each.value.ip_address}
-        routes:
-          - network: 0.0.0.0/0
-            gateway: ${each.value.ip_gateway}
-EOT
-  ] : []
+    cluster_name          = var.talos_cluster_name
+    machine_type          = "controlplane"
+    # TODO - Should we allow the user to override this?
+    # This is a single point of failure but without a proxy or load balancer
+    # it is required to be a single point of failure.
+    cluster_endpoint      = "https://${local.primary_control_node_ip}:6443"
+    machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
 }
 
 data "talos_machine_configuration" "worker_mc" {
-  for_each              = var.worker_nodes
-  cluster_name          = var.talos_cluster_name
-  machine_type          = "worker"
-  cluster_endpoint      = "https://${local.primary_control_node_ip}:6443"
-  machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
-
-  # Añade el parche de red solo si la IP está definida
-  config_patches = try(each.value.ip_address, null) != null ? [
-    <<-EOT
-machine:
-  network:
-    interfaces:
-      - interface: eth0
-        dhcp: false
-        addresses:
-          - ${each.value.ip_address}
-        routes:
-          - network: 0.0.0.0/0
-            gateway: ${each.value.ip_gateway}
-EOT
-  ] : []
+    cluster_name          = var.talos_cluster_name
+    machine_type          = "worker"
+    # TODO - Should we allow the user to override this?
+    # This is a single point of failure but without a proxy or load balancer
+    # it is required to be a single point of failure.
+    cluster_endpoint      = "https://${local.primary_control_node_ip}:6443"
+    machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
 }
 
 data "talos_client_configuration" "talos_client_config" {
@@ -198,16 +193,16 @@ data "talos_client_configuration" "talos_client_config" {
 resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
     for_each                      = var.control_nodes
     client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
-    machine_configuration_input   = data.talos_machine_configuration.control_mc.machine_configuration
-    node                          = try(each.value.ip_address, null) != null ? cidrhost(each.value.ip_address, 0) : proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
+    machine_configuration_input = data.talos_machine_configuration.control_mc.machine_configuration
+    node                          = proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
     config_patches                = var.control_machine_config_patches
 }
 
 resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
     for_each                      = var.worker_nodes
     client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
-    machine_configuration_input   = data.talos_machine_configuration.worker_mc[each.key].machine_configuration
-    node                          = try(each.value.ip_address, null) != null ? cidrhost(each.value.ip_address, 0) : proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
+    machine_configuration_input = data.talos_machine_configuration.worker_mc.machine_configuration
+    node                          = proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
     config_patches                = var.worker_machine_config_patches
 }
 
