@@ -212,7 +212,16 @@ resource "time_sleep" "wait_for_vms" {
     proxmox_virtual_environment_vm.talos_worker_vm
   ]
 
-  create_duration = "60s"
+  create_duration = "90s"
+}
+
+resource "time_sleep" "wait_after_config_apply" {
+  depends_on = [
+    talos_machine_configuration_apply.talos_control_mc_apply,
+    talos_machine_configuration_apply.talos_worker_mc_apply
+  ]
+
+  create_duration = "30s"
 }
 
 # Modificar el data source talos_client_configuration:
@@ -230,17 +239,13 @@ resource "talos_machine_bootstrap" "talos_bootstrap" {
   depends_on = [
     talos_machine_configuration_apply.talos_control_mc_apply,
     talos_machine_configuration_apply.talos_worker_mc_apply,
-    time_sleep.wait_for_vms
+    time_sleep.wait_for_vms,
+    time_sleep.wait_after_config_apply
   ]
 
   node                 = local.primary_control_node_ip
   client_configuration = talos_machine_secrets.talos_secrets.client_configuration
 
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
 }
 
 resource "talos_cluster_kubeconfig" "talos_kubeconfig" {
