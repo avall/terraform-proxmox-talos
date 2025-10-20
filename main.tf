@@ -63,24 +63,26 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
         type = "l26"
     }
 
-  initialization {
-    datastore_id = each.value.image_datastore
-    user_data = try(each.value.ip_address, null) != null ? templatefile("${path.module}/cloud-init.yml.tftpl", {
-      machine_config = b64encode(data.talos_machine_configuration.control_mc[each.key].machine_configuration)
-    }) : null
+    initialization {
+      datastore_id = each.value.image_datastore
 
-    dynamic "dns" {
-      for_each = try(each.value.dns_servers, null) != null ? [1] : []
-      content {
-        servers = each.value.dns_servers
+      # CORRECCIÓN: Usar 'cicustom' en lugar de 'user_data'
+      cicustom = try(each.value.ip_address, null) != null ? templatefile("${path.module}/cloud-init.yml.tftpl", {
+        machine_config = b64encode(data.talos_machine_configuration.control_mc[each.key].machine_configuration)
+      }) : null
+
+      dynamic "dns" {
+        for_each = try(each.value.dns_servers, null) != null ? [1] : []
+        content {
+          servers = each.value.dns_servers
+        }
+      }
+
+      user_account {
+        username = "talos"
+        password = "disabled"
       }
     }
-
-    user_account {
-      username = "talos"
-      password = "disabled"
-    }
-  }
 }
 
 resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
@@ -126,12 +128,14 @@ resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
         type = "l26"
     }
 
-    initialization {
-      datastore_id = each.value.image_datastore
-      user_data = try(each.value.ip_address, null) != null ? templatefile("${path.module}/cloud-init.yml.tftpl", {
-        machine_config = b64encode(data.talos_machine_configuration.worker_mc[each.key].machine_configuration)
-      }) : null
-    }
+  initialization {
+    datastore_id = each.value.image_datastore
+
+    # CORRECCIÓN: Usar 'cicustom' en lugar de 'user_data'
+    cicustom = try(each.value.ip_address, null) != null ? templatefile("${path.module}/cloud-init.yml.tftpl", {
+      machine_config = b64encode(data.talos_machine_configuration.worker_mc[each.key].machine_configuration)
+    }) : null
+  }
 }
 
 resource "talos_machine_secrets" "talos_secrets" {}
