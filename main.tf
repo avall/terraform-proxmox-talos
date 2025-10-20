@@ -164,23 +164,51 @@ resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
 resource "talos_machine_secrets" "talos_secrets" {}
 
 data "talos_machine_configuration" "control_mc" {
+  for_each              = var.control_nodes
   cluster_name          = var.talos_cluster_name
   machine_type          = "controlplane"
-  # TODO - Should we allow the user to override this?
-  # This is a single point of failure but without a proxy or load balancer
-  # it is required to be a single point of failure.
   cluster_endpoint      = "https://${local.primary_control_node_ip}:6443"
   machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
+
+  # Añade el parche de red solo si la IP está definida
+  config_patches = try(each.value.ip_address, null) != null ? [
+    <<-EOT
+machine:
+  network:
+    interfaces:
+      - interface: eth0
+        dhcp: false
+        addresses:
+          - ${each.value.ip_address}
+        routes:
+          - network: 0.0.0.0/0
+            gateway: ${each.value.ip_gateway}
+EOT
+  ] : []
 }
 
 data "talos_machine_configuration" "worker_mc" {
+  for_each              = var.worker_nodes
   cluster_name          = var.talos_cluster_name
   machine_type          = "worker"
-  # TODO - Should we allow the user to override this?
-  # This is a single point of failure but without a proxy or load balancer
-  # it is required to be a single point of failure.
   cluster_endpoint      = "https://${local.primary_control_node_ip}:6443"
   machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
+
+  # Añade el parche de red solo si la IP está definida
+  config_patches = try(each.value.ip_address, null) != null ? [
+    <<-EOT
+machine:
+  network:
+    interfaces:
+      - interface: eth0
+        dhcp: false
+        addresses:
+          - ${each.value.ip_address}
+        routes:
+          - network: 0.0.0.0/0
+            gateway: ${each.value.ip_gateway}
+EOT
+  ] : []
 }
 
 data "talos_client_configuration" "talos_client_config" {
@@ -193,16 +221,16 @@ data "talos_client_configuration" "talos_client_config" {
 resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
   for_each                      = var.control_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
-  machine_configuration_input = data.talos_machine_configuration.control_mc.machine_configuration
-  node                          = proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
+  machine_configuration_input   = data.talos_machine_configuration.control_mc[each.key].machine_configuration
+  node                          = try(each.value.ip_address, null) != null ? cidrhost(each.value.ip_address, 0) : proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
   config_patches                = var.control_machine_config_patches
 }
 
 resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
   for_each                      = var.worker_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
-  machine_configuration_input = data.talos_machine_configuration.worker_mc.machine_configuration
-  node                          = proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
+  machine_configuration_input   = data.talos_machine_configuration.worker_mc[each.key].machine_configuration
+  node                          = try(each.value.ip_address, null) != null ? cidrhost(each.value.ip_address, 0) : proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
   config_patches                = var.worker_machine_config_patches
 }
 
