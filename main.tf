@@ -194,7 +194,7 @@ resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
   for_each                      = var.control_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
   machine_configuration_input   = data.talos_machine_configuration.control_mc.machine_configuration
-  node                          = split("/", each.value.ip_address)[0]
+  node                          = proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
   config_patches                = concat(
     var.control_machine_config_patches,
     try(each.value.machine_config_patches, [])
@@ -205,7 +205,7 @@ resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
   for_each                      = var.worker_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
   machine_configuration_input   = data.talos_machine_configuration.worker_mc.machine_configuration
-  node                          = split("/", each.value.ip_address)[0]
+  node                          = proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
   config_patches                = concat(
     var.worker_machine_config_patches,
     try(each.value.machine_config_patches, [])
