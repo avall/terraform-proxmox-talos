@@ -91,6 +91,7 @@ variable "control_nodes" {
         memory            = number
         disk_size         = number
         image_datastore   = string
+        machine_config_patches = optional(list(string))
     }))
 }
 
@@ -105,6 +106,7 @@ variable "worker_nodes" {
         memory            = number
         disk_size         = number
         image_datastore   = string
+        machine_config_patches = optional(list(string))
         extra_disks       = optional(list(object({
             datastore_id = string
             size         = number

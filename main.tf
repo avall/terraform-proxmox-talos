@@ -64,22 +64,22 @@ resource "proxmox_virtual_environment_vm" "talos_control_vm" {
   initialization {
     datastore_id = each.value.image_datastore
 
-    dynamic "ip_config" {
-      for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
-      content {
-        ipv4 {
-          address = "${each.value.ip_address}"
-          gateway = each.value.ip_gateway
-        }
-      }
-    }
-
-    dynamic "dns" {
-      for_each = try(each.value.dns_servers, null) != null ? [1] : []
-      content {
-        servers = each.value.dns_servers
-      }
-    }
+    # dynamic "ip_config" {
+    #   for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
+    #   content {
+    #     ipv4 {
+    #       address = "${each.value.ip_address}"
+    #       gateway = each.value.ip_gateway
+    #     }
+    #   }
+    # }
+    #
+    # dynamic "dns" {
+    #   for_each = try(each.value.dns_servers, null) != null ? [1] : []
+    #   content {
+    #     servers = each.value.dns_servers
+    #   }
+    # }
 
     # Disable cloud-init user creation (Talos manages this)
     user_account {
@@ -135,22 +135,22 @@ resource "proxmox_virtual_environment_vm" "talos_worker_vm" {
   initialization {
     datastore_id = each.value.image_datastore
 
-    dynamic "ip_config" {
-      for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
-      content {
-        ipv4 {
-          address = "${each.value.ip_address}"
-          gateway = each.value.ip_gateway
-        }
-      }
-    }
-
-    dynamic "dns" {
-      for_each = try(each.value.dns_servers, null) != null ? [1] : []
-      content {
-        servers = each.value.dns_servers
-      }
-    }
+    # dynamic "ip_config" {
+    #   for_each = (try(each.value.ip_address, null) != null && try(each.value.ip_gateway, null) != null) ? [1] : []
+    #   content {
+    #     ipv4 {
+    #       address = "${each.value.ip_address}"
+    #       gateway = each.value.ip_gateway
+    #     }
+    #   }
+    # }
+    #
+    # dynamic "dns" {
+    #   for_each = try(each.value.dns_servers, null) != null ? [1] : []
+    #   content {
+    #     servers = each.value.dns_servers
+    #   }
+    # }
 
     # Disable cloud-init user creation (Talos manages this)
     user_account {
@@ -195,7 +195,10 @@ resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
   machine_configuration_input   = data.talos_machine_configuration.control_mc.machine_configuration
   node                          = proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
-  config_patches                = var.control_machine_config_patches
+  config_patches                = concat(
+    var.control_machine_config_patches,
+    try(each.value.machine_config_patches, [])
+  )
 }
 
 resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
@@ -203,7 +206,10 @@ resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
   machine_configuration_input   = data.talos_machine_configuration.worker_mc.machine_configuration
   node                          = proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
-  config_patches                = var.worker_machine_config_patches
+  config_patches                = concat(
+    var.worker_machine_config_patches,
+    try(each.value.machine_config_patches, [])
+  )
 }
 
 # You only need to bootstrap 1 control node; we pick the first one.
