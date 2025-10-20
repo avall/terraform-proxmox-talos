@@ -183,13 +183,6 @@ data "talos_machine_configuration" "worker_mc" {
   machine_secrets       = talos_machine_secrets.talos_secrets.machine_secrets
 }
 
-data "talos_client_configuration" "talos_client_config" {
-  cluster_name         = var.talos_cluster_name
-  client_configuration = talos_machine_secrets.talos_secrets.client_configuration
-  endpoints            = local.control_node_ips
-  nodes                = local.node_ips
-}
-
 resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
   for_each                      = var.control_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
