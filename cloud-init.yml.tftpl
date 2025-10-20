@@ -1,0 +1,5 @@
+#cloud-config
+write_files:
+  - path: /var/lib/talos/machine-config.yaml
+    content: ${machine_config}
+    encoding: b64
