@@ -7,13 +7,13 @@
 # and then reused to configure and bootstrap Talos.
 locals {
   # First control plane node IP (used for cluster_endpoint, bootstrap and kubeconfig)
-  primary_control_node_ip = proxmox_virtual_environment_vm.talos_control_vm[keys(var.control_nodes)[0]].ipv4_addresses[7][0]
+  primary_control_node_ip = split("/", var.control_nodes[keys(var.control_nodes)[0]].ip_address)[0]
 
   # All control plane node IPs discovered from the created VMs
-  control_node_ips = [for vm in keys(var.control_nodes) : proxmox_virtual_environment_vm.talos_control_vm[vm].ipv4_addresses[7][0]]
+  control_node_ips = [for node in values(var.control_nodes) : split("/", node.ip_address)[0]]
 
   # All worker node IPs discovered from the created VMs
-  worker_node_ips = [for vm in keys(var.worker_nodes) : proxmox_virtual_environment_vm.talos_worker_vm[vm].ipv4_addresses[7][0]]
+  worker_node_ips = [for node in values(var.worker_nodes) : split("/", node.ip_address)[0]]
 
   # Convenience list of every node IP (control + worker)
   node_ips = concat(
@@ -194,7 +194,7 @@ resource "talos_machine_configuration_apply" "talos_control_mc_apply" {
   for_each                      = var.control_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
   machine_configuration_input   = data.talos_machine_configuration.control_mc.machine_configuration
-  node                          = proxmox_virtual_environment_vm.talos_control_vm[each.key].ipv4_addresses[7][0]
+  node                          = split("/", each.value.ip_address)[0]
   config_patches                = concat(
     var.control_machine_config_patches,
     try(each.value.machine_config_patches, [])
@@ -205,17 +205,49 @@ resource "talos_machine_configuration_apply" "talos_worker_mc_apply" {
   for_each                      = var.worker_nodes
   client_configuration          = talos_machine_secrets.talos_secrets.client_configuration
   machine_configuration_input   = data.talos_machine_configuration.worker_mc.machine_configuration
-  node                          = proxmox_virtual_environment_vm.talos_worker_vm[each.key].ipv4_addresses[7][0]
+  node                          = split("/", each.value.ip_address)[0]
   config_patches                = concat(
     var.worker_machine_config_patches,
     try(each.value.machine_config_patches, [])
   )
 }
 
+# Agregar después del recurso de descarga de imagen:
+resource "time_sleep" "wait_for_vms" {
+  depends_on = [
+    proxmox_virtual_environment_vm.talos_control_vm,
+    proxmox_virtual_environment_vm.talos_worker_vm
+  ]
+
+  create_duration = "60s"
+}
+
+# Modificar el data source talos_client_configuration:
+data "talos_client_configuration" "talos_client_config" {
+  depends_on = [time_sleep.wait_for_vms]
+
+  cluster_name         = var.talos_cluster_name
+  client_configuration = talos_machine_secrets.talos_secrets.client_configuration
+  endpoints            = local.control_node_ips
+  nodes                = local.node_ips
+}
+
 # You only need to bootstrap 1 control node; we pick the first one.
 resource "talos_machine_bootstrap" "talos_bootstrap" {
+  depends_on = [
+    talos_machine_configuration_apply.talos_control_mc_apply,
+    talos_machine_configuration_apply.talos_worker_mc_apply,
+    time_sleep.wait_for_vms
+  ]
+
   node                 = local.primary_control_node_ip
   client_configuration = talos_machine_secrets.talos_secrets.client_configuration
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+    delete = "10m"
+  }
 }
 
 resource "talos_cluster_kubeconfig" "talos_kubeconfig" {
